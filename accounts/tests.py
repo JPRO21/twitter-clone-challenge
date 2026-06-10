@@ -455,13 +455,17 @@ class FollowModelTest(TestCase):
         self.alice.delete()
         self.assertEqual(Follow.objects.count(), 1)
 
-    def test_following_related_name(self):
+    def test_following_relationships_related_name(self):
         Follow.objects.create(follower=self.alice, following=self.bob)
-        self.assertEqual(self.alice.following.count(), 1)
+        self.assertEqual(self.alice.following_relationships.count(), 1)
 
-    def test_followers_related_name(self):
+    def test_follower_relationships_related_name(self):
         Follow.objects.create(follower=self.alice, following=self.bob)
-        self.assertEqual(self.bob.followers.count(), 1)
+        self.assertEqual(self.bob.follower_relationships.count(), 1)
+
+    def test_check_constraint_prevents_self_follow_at_db_level(self):
+        with self.assertRaises(Exception):
+            Follow.objects.create(follower=self.alice, following=self.alice)
 
 
 # ---------------------------------------------------------------------------
