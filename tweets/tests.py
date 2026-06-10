@@ -1,9 +1,12 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
 
 from accounts.models import User
 from .models import Tweet
+
+CREATE_URL = "/tweets/create/"
 
 
 class TweetModelTest(TestCase):
@@ -97,3 +100,112 @@ class TweetModelTest(TestCase):
         Tweet.objects.create(author=self.user, body="Tweet A")
         Tweet.objects.create(author=self.user, body="Tweet B")
         self.assertEqual(self.user.tweets.count(), 2)
+
+
+# ---------------------------------------------------------------------------
+# Tweet creation view
+# ---------------------------------------------------------------------------
+
+class TweetCreateViewTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice",
+            email="alice@example.com",
+            password="StrongPass123!",
+        )
+        self.other = User.objects.create_user(
+            username="bob",
+            email="bob@example.com",
+            password="StrongPass123!",
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    # -- GET ------------------------------------------------------------------
+
+    def test_create_page_loads(self):
+        response = self.client.get(CREATE_URL)
+        self.assertEqual(response.status_code, 200)
+
+    def test_create_page_contains_form(self):
+        response = self.client.get(CREATE_URL)
+        self.assertContains(response, "<form")
+        self.assertContains(response, "name=\"body\"")
+
+    def test_create_page_extends_base(self):
+        response = self.client.get(CREATE_URL)
+        self.assertContains(response, "Twitter Clone")
+
+    # -- POST: success --------------------------------------------------------
+
+    def test_authenticated_user_can_create_tweet(self):
+        response = self.client.post(CREATE_URL, {"body": "Hello, world!"})
+        self.assertEqual(Tweet.objects.count(), 1)
+
+    def test_created_tweet_belongs_to_request_user(self):
+        self.client.post(CREATE_URL, {"body": "My tweet"})
+        tweet = Tweet.objects.get()
+        self.assertEqual(tweet.author, self.user)
+
+    def test_successful_creation_redirects_to_profile(self):
+        response = self.client.post(CREATE_URL, {"body": "Hello!"})
+        self.assertRedirects(
+            response,
+            reverse("profile", kwargs={"username": "alice"}),
+        )
+
+    def test_tweet_body_saved_correctly(self):
+        self.client.post(CREATE_URL, {"body": "Exact body text"})
+        self.assertEqual(Tweet.objects.get().body, "Exact body text")
+
+    # -- POST: author spoofing ------------------------------------------------
+
+    def test_author_cannot_be_spoofed_via_post(self):
+        self.client.post(CREATE_URL, {
+            "body": "Spoofed tweet",
+            "author": self.other.pk,
+        })
+        tweet = Tweet.objects.get(body="Spoofed tweet")
+        self.assertEqual(tweet.author, self.user)
+
+    # -- POST: validation -----------------------------------------------------
+
+    def test_empty_body_rejected(self):
+        response = self.client.post(CREATE_URL, {"body": ""})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Tweet.objects.count(), 0)
+
+    def test_body_at_280_characters_accepted(self):
+        self.client.post(CREATE_URL, {"body": "x" * 280})
+        self.assertEqual(Tweet.objects.count(), 1)
+
+    def test_body_over_280_characters_rejected(self):
+        response = self.client.post(CREATE_URL, {"body": "x" * 281})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Tweet.objects.count(), 0)
+
+    def test_validation_errors_shown_in_template(self):
+        response = self.client.post(CREATE_URL, {"body": ""})
+        self.assertContains(response, "This field is required")
+
+    # -- Anonymous access -----------------------------------------------------
+
+    def test_anonymous_user_redirected_to_login(self):
+        self.client.logout()
+        response = self.client.get(CREATE_URL)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_redirect_includes_next_parameter(self):
+        self.client.logout()
+        response = self.client.get(CREATE_URL)
+        self.assertIn("next=", response["Location"])
+
+    def test_anonymous_next_points_to_create_url(self):
+        self.client.logout()
+        response = self.client.get(CREATE_URL)
+        self.assertIn("/tweets/create/", response["Location"])
+
+    def test_anonymous_post_does_not_create_tweet(self):
+        self.client.logout()
+        self.client.post(CREATE_URL, {"body": "Should not save"})
+        self.assertEqual(Tweet.objects.count(), 0)

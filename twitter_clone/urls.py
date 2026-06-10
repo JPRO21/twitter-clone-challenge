@@ -7,4 +7,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", account_views.home, name="home"),
     path("", include("accounts.urls")),
+    path("tweets/", include("tweets.urls")),
 ]

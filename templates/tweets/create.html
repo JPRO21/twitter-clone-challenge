@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}New Tweet — Twitter Clone{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+  <h1 class="text-xl font-bold mb-4">New tweet</h1>
+
+  <form method="post" novalidate
+        class="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="p-3 bg-red-50 rounded-lg text-sm text-red-700">
+        {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+      </div>
+    {% endif %}
+
+    <div>
+      {{ form.body }}
+      {% for error in form.body.errors %}
+        <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+      {% endfor %}
+      <div class="flex justify-end mt-1">
+        <span id="char-count" class="text-xs text-gray-400">0 / 280</span>
+      </div>
+    </div>
+
+    <div class="flex justify-end">
+      <button type="submit"
+              class="bg-blue-500 text-white px-5 py-2 rounded-full font-medium
+                     hover:bg-blue-600 transition-colors disabled:opacity-50"
+              id="submit-btn">
+        Tweet
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+  const body = document.getElementById("{{ form.body.id_for_label }}");
+  const counter = document.getElementById("char-count");
+  const btn = document.getElementById("submit-btn");
+  const MAX = 280;
+
+  function update() {
+    const len = body.value.length;
+    counter.textContent = len + " / " + MAX;
+    counter.classList.toggle("text-red-500", len > MAX);
+    counter.classList.toggle("text-gray-400", len <= MAX);
+    btn.disabled = len === 0 || len > MAX;
+  }
+
+  body.addEventListener("input", update);
+  update();
+</script>
+{% endblock %}
