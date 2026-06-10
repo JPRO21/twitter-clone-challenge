@@ -256,3 +256,146 @@ class AuthE2ETest(TestCase):
         resp = self.client.get(reverse("home"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn(reverse("login"), resp["Location"])
+
+
+# ---------------------------------------------------------------------------
+# Profile view
+# ---------------------------------------------------------------------------
+
+class ProfileViewTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice",
+            email="alice@example.com",
+            password="StrongPass123!",
+            display_name="Alice Smith",
+            bio="Hello, I'm Alice.",
+        )
+        self.bob = User.objects.create_user(
+            username="bob",
+            email="bob@example.com",
+            password="StrongPass123!",
+            display_name="Bob Jones",
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    def test_profile_page_loads(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertEqual(response.status_code, 200)
+
+    def test_profile_shows_username(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertContains(response, "alice")
+
+    def test_profile_shows_display_name(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertContains(response, "Alice Smith")
+
+    def test_profile_shows_bio(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertContains(response, "Hello, I&#x27;m Alice.")
+
+    def test_profile_shows_date_joined(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Joined")
+
+    def test_profile_shows_edit_button_for_own_profile(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertContains(response, "Edit profile")
+
+    def test_profile_hides_edit_button_for_other_profile(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertNotContains(response, "Edit profile")
+
+    def test_authenticated_user_can_view_other_profile(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bob Jones")
+
+    def test_nonexistent_user_returns_404(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "nobody"}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_user_redirected_to_login(self):
+        self.client.logout()
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertIn("next=", response["Location"])
+
+
+# ---------------------------------------------------------------------------
+# Profile edit
+# ---------------------------------------------------------------------------
+
+class ProfileEditViewTest(TestCase):
+    URL = "/settings/profile/"
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice",
+            email="alice@example.com",
+            password="StrongPass123!",
+            display_name="Alice",
+            bio="Old bio",
+        )
+        self.bob = User.objects.create_user(
+            username="bob",
+            email="bob@example.com",
+            password="StrongPass123!",
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    def test_edit_page_loads(self):
+        response = self.client.get(self.URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<form")
+
+    def test_edit_page_shows_current_display_name(self):
+        response = self.client.get(self.URL)
+        self.assertContains(response, "Alice")
+
+    def test_edit_page_shows_current_bio(self):
+        response = self.client.get(self.URL)
+        self.assertContains(response, "Old bio")
+
+    def test_edit_updates_display_name(self):
+        self.client.post(self.URL, {"display_name": "Alice Updated", "bio": "Old bio"})
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.display_name, "Alice Updated")
+
+    def test_edit_updates_bio(self):
+        self.client.post(self.URL, {"display_name": "Alice", "bio": "Brand new bio"})
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.bio, "Brand new bio")
+
+    def test_edit_redirects_to_own_profile_on_success(self):
+        response = self.client.post(self.URL, {"display_name": "Alice", "bio": "Bio"})
+        self.assertRedirects(response, reverse("profile", kwargs={"username": "alice"}))
+
+    def test_edit_does_not_affect_other_users(self):
+        self.client.post(self.URL, {"display_name": "Alice", "bio": "Updated"})
+        self.bob.refresh_from_db()
+        self.assertNotEqual(self.bob.bio, "Updated")
+
+    def test_anonymous_user_redirected_to_login(self):
+        self.client.logout()
+        response = self.client.get(self.URL)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.get(self.URL)
+        self.assertIn("next=", response["Location"])
+
+    def test_anonymous_post_does_not_save(self):
+        self.client.logout()
+        self.client.post(self.URL, {"display_name": "Hacked", "bio": "Hacked"})
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.display_name, "Alice")

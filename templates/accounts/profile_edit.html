@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Profile — Twitter Clone{% endblock %}
+
+{% block content %}
+<div class="max-w-sm mx-auto">
+  <h1 class="text-2xl font-bold mb-6">Edit profile</h1>
+
+  <form method="post" novalidate
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="p-3 bg-red-50 rounded-lg text-sm text-red-700">
+        {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+      </div>
+    {% endif %}
+
+    {% for field in form %}
+      <div>
+        <label for="{{ field.id_for_label }}"
+               class="block text-sm font-medium text-gray-700 mb-1">
+          {{ field.label }}
+        </label>
+        {{ field }}
+        {% for error in field.errors %}
+          <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endfor %}
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+              class="flex-1 bg-blue-500 text-white py-2 rounded-full font-medium
+                     hover:bg-blue-600 transition-colors">
+        Save
+      </button>
+      <a href="{% url 'profile' username=request.user.username %}"
+         class="flex-1 text-center border border-gray-300 py-2 rounded-full text-sm
+                hover:bg-gray-50 transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

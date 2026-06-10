@@ -1,10 +1,11 @@
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from .forms import LoginForm, RegisterForm
+from .forms import LoginForm, ProfileEditForm, RegisterForm
+from .models import User
 
 
 def register(request):
@@ -59,3 +60,21 @@ def logout_view(request):
 def home(request):
     # Placeholder until timeline is implemented (step 11).
     return HttpResponse("<h1>Home</h1><p>Timeline coming soon.</p>", content_type="text/html")
+
+
+@login_required
+def profile(request, username):
+    profile_user = get_object_or_404(User, username=username)
+    return render(request, "accounts/profile.html", {"profile_user": profile_user})
+
+
+@login_required
+def profile_edit(request):
+    if request.method == "POST":
+        form = ProfileEditForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            return redirect("profile", username=request.user.username)
+    else:
+        form = ProfileEditForm(instance=request.user)
+    return render(request, "accounts/profile_edit.html", {"form": form})

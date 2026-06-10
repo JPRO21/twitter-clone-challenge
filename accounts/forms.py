@@ -49,6 +49,20 @@ class RegisterForm(forms.ModelForm):
         return user
 
 
+class ProfileEditForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = ["display_name", "bio"]
+        widgets = {
+            "bio": forms.Textarea(attrs={"rows": 4}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = _INPUT_CSS
+
+
 class LoginForm(forms.Form):
     username = forms.CharField(label="Username or email")
     password = forms.CharField(widget=forms.PasswordInput)
