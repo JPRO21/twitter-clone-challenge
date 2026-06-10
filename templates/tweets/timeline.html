@@ -90,5 +90,29 @@
     </div>
   {% endfor %}
 
+  {# Pagination #}
+  {% if page_obj.has_other_pages %}
+  <div class="bg-white rounded-xl border border-gray-200 px-4 py-3
+              flex items-center justify-between text-sm">
+    {% if page_obj.has_previous %}
+      <a href="?page={{ page_obj.previous_page_number }}"
+         class="text-blue-500 hover:underline">← Previous</a>
+    {% else %}
+      <span></span>
+    {% endif %}
+
+    <span class="text-gray-400 text-xs">
+      Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+    </span>
+
+    {% if page_obj.has_next %}
+      <a href="?page={{ page_obj.next_page_number }}"
+         class="text-blue-500 hover:underline">Next →</a>
+    {% else %}
+      <span></span>
+    {% endif %}
+  </div>
+  {% endif %}
+
 </div>
 {% endblock %}

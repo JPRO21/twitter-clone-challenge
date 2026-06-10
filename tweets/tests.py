@@ -309,18 +309,109 @@ class TimelineViewTest(TestCase):
     # -- N+1 / query count ----------------------------------------------------
 
     def test_query_count_does_not_grow_with_more_authors(self):
-        """select_related + annotate(Count, Exists) stay in one SQL statement."""
+        """Paginator adds one COUNT; total stays flat regardless of author/tweet count."""
         for i in range(10):
             u = User.objects.create_user(
                 username=f"u{i}", email=f"u{i}@ex.com", password="p"
             )
             Tweet.objects.create(author=u, body=f"Tweet by u{i}")
 
-        # Measured: session(1) + user(1) + tweets-with-author-join+like-annotations(1) = 3.
-        # Count and Exists annotations are compiled into the same SQL statement.
-        with self.assertNumQueries(3):
+        # Measured: session(1) + user(1) + Paginator.count(1) + tweets-data(1) = 4.
+        # Paginator wraps the annotated queryset in COUNT(*) FROM (subquery).
+        # The data query still uses select_related + Count + Exists in one statement.
+        with self.assertNumQueries(4):
             response = self.client.get(TIMELINE_URL)
         self.assertEqual(response.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# Timeline pagination
+# ---------------------------------------------------------------------------
+
+class TimelinePaginationTest(TestCase):
+    """25 tweets: page 1 → 20 newest, page 2 → 5 oldest."""
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+        for i in range(25):
+            Tweet.objects.create(author=self.alice, body=f"Tweet {i:02d}")
+
+    # -- page content ---------------------------------------------------------
+
+    def test_first_page_shows_20_tweets(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertEqual(len(response.context["tweets"]), 20)
+
+    def test_second_page_shows_remaining_tweets(self):
+        response = self.client.get(TIMELINE_URL + "?page=2")
+        self.assertEqual(len(response.context["tweets"]), 5)
+
+    def test_newest_first_ordering_preserved_on_page_1(self):
+        response = self.client.get(TIMELINE_URL)
+        content = response.content.decode()
+        # Newest (Tweet 24) before oldest visible on page 1 (Tweet 05)
+        self.assertLess(content.index("Tweet 24"), content.index("Tweet 05"))
+
+    def test_page_2_contains_oldest_tweets(self):
+        response = self.client.get(TIMELINE_URL + "?page=2")
+        self.assertContains(response, "Tweet 00")
+        self.assertNotContains(response, "Tweet 24")
+
+    def test_page_1_does_not_contain_oldest_tweets(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertNotContains(response, "Tweet 00")
+
+    # -- invalid / edge pages -------------------------------------------------
+
+    def test_non_integer_page_does_not_crash(self):
+        response = self.client.get(TIMELINE_URL + "?page=abc")
+        self.assertEqual(response.status_code, 200)
+
+    def test_out_of_range_page_does_not_crash(self):
+        response = self.client.get(TIMELINE_URL + "?page=9999")
+        self.assertEqual(response.status_code, 200)
+
+    def test_negative_page_does_not_crash(self):
+        response = self.client.get(TIMELINE_URL + "?page=-1")
+        self.assertEqual(response.status_code, 200)
+
+    # -- context --------------------------------------------------------------
+
+    def test_page_obj_in_context(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertIn("page_obj", response.context)
+
+    def test_second_page_accessible(self):
+        response = self.client.get(TIMELINE_URL + "?page=2")
+        self.assertEqual(response.status_code, 200)
+
+    # -- query count ----------------------------------------------------------
+
+    def test_query_count_remains_bounded(self):
+        # session(1) + user(1) + Paginator COUNT(1) + data(1) = 4
+        with self.assertNumQueries(4):
+            response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.status_code, 200)
+
+    def test_adding_more_tweets_does_not_increase_query_count(self):
+        for i in range(50):
+            Tweet.objects.create(author=self.alice, body=f"Extra {i}")
+        with self.assertNumQueries(4):
+            response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.status_code, 200)
+
+    # -- navigation -----------------------------------------------------------
+
+    def test_pagination_nav_shown_when_multiple_pages(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "Next")
+
+    def test_pagination_nav_shows_previous_on_page_2(self):
+        response = self.client.get(TIMELINE_URL + "?page=2")
+        self.assertContains(response, "Previous")
 
 
 # ---------------------------------------------------------------------------

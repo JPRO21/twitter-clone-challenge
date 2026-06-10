@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import InvalidPage, Paginator
 from django.db.models import Count, Exists, OuterRef
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -7,9 +8,12 @@ from .forms import TweetForm
 from .models import Like, Tweet
 
 
+PAGE_SIZE = 20
+
+
 @login_required
 def timeline(request):
-    tweets = (
+    qs = (
         Tweet.objects
         .select_related("author")
         .annotate(
@@ -18,9 +22,17 @@ def timeline(request):
                 Like.objects.filter(user=request.user, tweet=OuterRef("pk"))
             ),
         )
-        .order_by("-created_at")[:20]
+        .order_by("-created_at")
     )
-    return render(request, "tweets/timeline.html", {"tweets": tweets})
+    paginator = Paginator(qs, PAGE_SIZE)
+    try:
+        page_obj = paginator.page(request.GET.get("page", 1))
+    except InvalidPage:
+        page_obj = paginator.page(1)
+    return render(request, "tweets/timeline.html", {
+        "tweets": page_obj.object_list,
+        "page_obj": page_obj,
+    })
 
 
 @login_required
