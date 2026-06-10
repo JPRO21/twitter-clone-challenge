@@ -1,11 +1,11 @@
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from .forms import LoginForm, ProfileEditForm, RegisterForm
-from .models import User
+from .models import Follow, User
 
 
 def register(request):
@@ -65,7 +65,38 @@ def home(request):
 @login_required
 def profile(request, username):
     profile_user = get_object_or_404(User, username=username)
-    return render(request, "accounts/profile.html", {"profile_user": profile_user})
+    following_count = Follow.objects.filter(follower=profile_user).count()
+    followers_count = Follow.objects.filter(following=profile_user).count()
+    is_following = (
+        request.user != profile_user
+        and Follow.objects.filter(follower=request.user, following=profile_user).exists()
+    )
+    return render(request, "accounts/profile.html", {
+        "profile_user": profile_user,
+        "following_count": following_count,
+        "followers_count": followers_count,
+        "is_following": is_following,
+    })
+
+
+@login_required
+def follow_user(request, username):
+    if request.method != "POST":
+        return redirect("profile", username=username)
+    target = get_object_or_404(User, username=username)
+    if target == request.user:
+        return HttpResponseBadRequest("You cannot follow yourself.")
+    Follow.objects.get_or_create(follower=request.user, following=target)
+    return redirect("profile", username=username)
+
+
+@login_required
+def unfollow_user(request, username):
+    if request.method != "POST":
+        return redirect("profile", username=username)
+    target = get_object_or_404(User, username=username)
+    Follow.objects.filter(follower=request.user, following=target).delete()
+    return redirect("profile", username=username)
 
 
 @login_required

@@ -27,6 +27,26 @@
                   hover:bg-gray-50 transition-colors">
           Edit profile
         </a>
+      {% else %}
+        {% if is_following %}
+          <form method="post" action="{% url 'unfollow_user' username=profile_user.username %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="shrink-0 text-sm border border-gray-300 rounded-full px-4 py-1.5
+                           hover:bg-gray-50 transition-colors">
+              Unfollow
+            </button>
+          </form>
+        {% else %}
+          <form method="post" action="{% url 'follow_user' username=profile_user.username %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="shrink-0 text-sm bg-gray-900 text-white rounded-full px-4 py-1.5
+                           hover:bg-gray-700 transition-colors">
+              Follow
+            </button>
+          </form>
+        {% endif %}
       {% endif %}
     </div>
 
@@ -40,10 +60,10 @@
       Joined {{ profile_user.date_joined|date:"F Y" }}
     </p>
 
-    {# Stats row (followers / following — counts added when Follow model exists) #}
+    {# Stats row #}
     <div class="mt-4 flex gap-6 text-sm">
-      <span><strong class="text-gray-900">0</strong> <span class="text-gray-500">Following</span></span>
-      <span><strong class="text-gray-900">0</strong> <span class="text-gray-500">Followers</span></span>
+      <span><strong class="text-gray-900">{{ following_count }}</strong> <span class="text-gray-500">Following</span></span>
+      <span><strong class="text-gray-900">{{ followers_count }}</strong> <span class="text-gray-500">Followers</span></span>
     </div>
   </div>
 

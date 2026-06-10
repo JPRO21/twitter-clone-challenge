@@ -1,7 +1,8 @@
+from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import User
+from .models import Follow, User
 
 
 # ---------------------------------------------------------------------------
@@ -399,3 +400,204 @@ class ProfileEditViewTest(TestCase):
         self.client.post(self.URL, {"display_name": "Hacked", "bio": "Hacked"})
         self.alice.refresh_from_db()
         self.assertEqual(self.alice.display_name, "Alice")
+
+
+# ---------------------------------------------------------------------------
+# Follow model
+# ---------------------------------------------------------------------------
+
+class FollowModelTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="pass"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="pass"
+        )
+        self.carol = User.objects.create_user(
+            username="carol", email="carol@example.com", password="pass"
+        )
+
+    def test_create_follow(self):
+        follow = Follow.objects.create(follower=self.alice, following=self.bob)
+        self.assertIsNotNone(follow.pk)
+
+    def test_created_at_auto_populated(self):
+        follow = Follow.objects.create(follower=self.alice, following=self.bob)
+        self.assertIsNotNone(follow.created_at)
+
+    def test_unique_constraint_prevents_duplicate_follow(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        with self.assertRaises(IntegrityError):
+            Follow.objects.create(follower=self.alice, following=self.bob)
+
+    def test_index_exists(self):
+        index_names = [idx.name for idx in Follow._meta.indexes]
+        self.assertIn("follow_follower_following_idx", index_names)
+
+    def test_index_covers_follower_and_following(self):
+        idx = next(i for i in Follow._meta.indexes if i.name == "follow_follower_following_idx")
+        self.assertEqual(list(idx.fields), ["follower", "following"])
+
+    def test_cascade_delete_when_follower_deleted(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        self.alice.delete()
+        self.assertEqual(Follow.objects.count(), 0)
+
+    def test_cascade_delete_when_following_deleted(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        self.bob.delete()
+        self.assertEqual(Follow.objects.count(), 0)
+
+    def test_cascade_does_not_affect_unrelated_follows(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        Follow.objects.create(follower=self.carol, following=self.bob)
+        self.alice.delete()
+        self.assertEqual(Follow.objects.count(), 1)
+
+    def test_following_related_name(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        self.assertEqual(self.alice.following.count(), 1)
+
+    def test_followers_related_name(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        self.assertEqual(self.bob.followers.count(), 1)
+
+
+# ---------------------------------------------------------------------------
+# Follow / Unfollow views
+# ---------------------------------------------------------------------------
+
+class FollowViewTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="StrongPass123!"
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    # -- follow ---------------------------------------------------------------
+
+    def test_follow_creates_relationship(self):
+        self.client.post(reverse("follow_user", kwargs={"username": "bob"}))
+        self.assertTrue(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
+
+    def test_follow_redirects_to_profile(self):
+        response = self.client.post(reverse("follow_user", kwargs={"username": "bob"}))
+        self.assertRedirects(response, reverse("profile", kwargs={"username": "bob"}))
+
+    def test_duplicate_follow_is_idempotent(self):
+        self.client.post(reverse("follow_user", kwargs={"username": "bob"}))
+        self.client.post(reverse("follow_user", kwargs={"username": "bob"}))
+        self.assertEqual(Follow.objects.filter(follower=self.alice, following=self.bob).count(), 1)
+
+    def test_self_follow_returns_400(self):
+        response = self.client.post(reverse("follow_user", kwargs={"username": "alice"}))
+        self.assertEqual(response.status_code, 400)
+
+    def test_self_follow_does_not_create_follow(self):
+        self.client.post(reverse("follow_user", kwargs={"username": "alice"}))
+        self.assertFalse(Follow.objects.filter(follower=self.alice, following=self.alice).exists())
+
+    def test_follow_nonexistent_user_returns_404(self):
+        response = self.client.post(reverse("follow_user", kwargs={"username": "nobody"}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_follow_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.post(reverse("follow_user", kwargs={"username": "bob"}))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_follow_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.post(reverse("follow_user", kwargs={"username": "bob"}))
+        self.assertIn("next=", response["Location"])
+
+    # -- unfollow -------------------------------------------------------------
+
+    def test_unfollow_removes_relationship(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        self.client.post(reverse("unfollow_user", kwargs={"username": "bob"}))
+        self.assertFalse(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
+
+    def test_unfollow_redirects_to_profile(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.post(reverse("unfollow_user", kwargs={"username": "bob"}))
+        self.assertRedirects(response, reverse("profile", kwargs={"username": "bob"}))
+
+    def test_unfollow_nonexistent_follow_is_idempotent(self):
+        response = self.client.post(reverse("unfollow_user", kwargs={"username": "bob"}))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
+
+    def test_anonymous_unfollow_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.post(reverse("unfollow_user", kwargs={"username": "bob"}))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+
+# ---------------------------------------------------------------------------
+# Profile page — follow integration
+# ---------------------------------------------------------------------------
+
+class ProfileFollowIntegrationTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="StrongPass123!"
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    def test_profile_shows_following_count(self):
+        Follow.objects.create(follower=self.bob, following=self.alice)
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertContains(response, "Following")
+
+    def test_profile_shows_followers_count(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertContains(response, "Followers")
+
+    def test_profile_shows_correct_follower_count(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertContains(response, "1")
+
+    def test_profile_shows_zero_counts_when_no_follows(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertEqual(response.context["following_count"], 0)
+        self.assertEqual(response.context["followers_count"], 0)
+
+    def test_profile_shows_follow_button_when_not_following(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertContains(response, "Follow")
+        self.assertNotContains(response, "Unfollow")
+
+    def test_profile_shows_unfollow_button_when_following(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertContains(response, "Unfollow")
+
+    def test_profile_hides_follow_button_on_own_profile(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertNotContains(response, 'name="follow_user"')
+        self.assertContains(response, "Edit profile")
+
+    def test_is_following_false_for_own_profile(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertFalse(response.context["is_following"])
+
+    def test_is_following_true_after_follow(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertTrue(response.context["is_following"])
+
+    def test_is_following_false_before_follow(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
+        self.assertFalse(response.context["is_following"])
