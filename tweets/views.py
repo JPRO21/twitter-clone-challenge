@@ -1,13 +1,24 @@
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect, render
+from django.db.models import Count, Exists, OuterRef
+from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import TweetForm
-from .models import Tweet
+from .models import Like, Tweet
 
 
 @login_required
 def timeline(request):
-    tweets = Tweet.objects.select_related("author").order_by("-created_at")[:20]
+    tweets = (
+        Tweet.objects
+        .select_related("author")
+        .annotate(
+            like_count=Count("likes"),
+            user_liked=Exists(
+                Like.objects.filter(user=request.user, tweet=OuterRef("pk"))
+            ),
+        )
+        .order_by("-created_at")[:20]
+    )
     return render(request, "tweets/timeline.html", {"tweets": tweets})
 
 
@@ -23,3 +34,21 @@ def tweet_create(request):
     else:
         form = TweetForm()
     return render(request, "tweets/create.html", {"form": form})
+
+
+@login_required
+def like_tweet(request, pk):
+    if request.method != "POST":
+        return redirect("timeline")
+    tweet = get_object_or_404(Tweet, pk=pk)
+    Like.objects.get_or_create(user=request.user, tweet=tweet)
+    return redirect("timeline")
+
+
+@login_required
+def unlike_tweet(request, pk):
+    if request.method != "POST":
+        return redirect("timeline")
+    tweet = get_object_or_404(Tweet, pk=pk)
+    Like.objects.filter(user=request.user, tweet=tweet).delete()
+    return redirect("timeline")

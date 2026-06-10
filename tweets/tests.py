@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import User
-from .models import Tweet
+from .models import Like, Tweet
 
 CREATE_URL = "/tweets/create/"
 TIMELINE_URL = "/timeline/"
@@ -309,15 +309,189 @@ class TimelineViewTest(TestCase):
     # -- N+1 / query count ----------------------------------------------------
 
     def test_query_count_does_not_grow_with_more_authors(self):
-        """select_related ensures author data is fetched in the same query."""
+        """select_related + annotate(Count, Exists) stay in one SQL statement."""
         for i in range(10):
             u = User.objects.create_user(
                 username=f"u{i}", email=f"u{i}@ex.com", password="p"
             )
             Tweet.objects.create(author=u, body=f"Tweet by u{i}")
 
-        # Measured: session(1) + user(1) + tweets-with-author-join(1) = 3.
-        # Flat regardless of author count — proves select_related works.
+        # Measured: session(1) + user(1) + tweets-with-author-join+like-annotations(1) = 3.
+        # Count and Exists annotations are compiled into the same SQL statement.
         with self.assertNumQueries(3):
             response = self.client.get(TIMELINE_URL)
         self.assertEqual(response.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# Like model
+# ---------------------------------------------------------------------------
+
+class LikeModelTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="pass"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="pass"
+        )
+        self.tweet = Tweet.objects.create(author=self.alice, body="Hello world")
+
+    def test_create_like(self):
+        like = Like.objects.create(user=self.bob, tweet=self.tweet)
+        self.assertIsNotNone(like.pk)
+
+    def test_created_at_auto_populated(self):
+        like = Like.objects.create(user=self.bob, tweet=self.tweet)
+        self.assertIsNotNone(like.created_at)
+
+    def test_unique_constraint_prevents_duplicate_like(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        with self.assertRaises(IntegrityError):
+            Like.objects.create(user=self.bob, tweet=self.tweet)
+
+    def test_self_like_allowed(self):
+        like = Like.objects.create(user=self.alice, tweet=self.tweet)
+        self.assertIsNotNone(like.pk)
+
+    def test_cascade_delete_when_tweet_deleted(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        self.tweet.delete()
+        self.assertEqual(Like.objects.count(), 0)
+
+    def test_cascade_delete_when_user_deleted(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        self.bob.delete()
+        self.assertEqual(Like.objects.count(), 0)
+
+    def test_cascade_does_not_affect_other_likes(self):
+        other_tweet = Tweet.objects.create(author=self.alice, body="Another tweet")
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        Like.objects.create(user=self.bob, tweet=other_tweet)
+        self.tweet.delete()
+        self.assertEqual(Like.objects.count(), 1)
+
+    def test_index_exists(self):
+        index_names = [idx.name for idx in Like._meta.indexes]
+        self.assertIn("like_user_tweet_idx", index_names)
+
+
+# ---------------------------------------------------------------------------
+# Like / Unlike views
+# ---------------------------------------------------------------------------
+
+class LikeViewTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="StrongPass123!"
+        )
+        self.tweet = Tweet.objects.create(author=self.alice, body="Hello world")
+        self.client.login(username="bob", password="StrongPass123!")
+
+    # -- like -----------------------------------------------------------------
+
+    def test_authenticated_user_can_like(self):
+        self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertTrue(Like.objects.filter(user=self.bob, tweet=self.tweet).exists())
+
+    def test_like_creates_one_record(self):
+        self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertEqual(Like.objects.count(), 1)
+
+    def test_like_redirects_to_timeline(self):
+        response = self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertRedirects(response, reverse("timeline"))
+
+    def test_duplicate_like_is_idempotent(self):
+        self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertEqual(Like.objects.filter(user=self.bob, tweet=self.tweet).count(), 1)
+
+    def test_self_like_is_allowed(self):
+        self.client.login(username="alice", password="StrongPass123!")
+        self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertTrue(Like.objects.filter(user=self.alice, tweet=self.tweet).exists())
+
+    def test_like_nonexistent_tweet_returns_404(self):
+        response = self.client.post(reverse("like_tweet", kwargs={"pk": 99999}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_like_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_like_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.post(reverse("like_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertIn("next=", response["Location"])
+
+    # -- unlike ---------------------------------------------------------------
+
+    def test_authenticated_user_can_unlike(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        self.client.post(reverse("unlike_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertFalse(Like.objects.filter(user=self.bob, tweet=self.tweet).exists())
+
+    def test_unlike_redirects_to_timeline(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        response = self.client.post(reverse("unlike_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertRedirects(response, reverse("timeline"))
+
+    def test_unlike_nonexistent_like_is_idempotent(self):
+        response = self.client.post(reverse("unlike_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Like.objects.count(), 0)
+
+    def test_anonymous_unlike_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.post(reverse("unlike_tweet", kwargs={"pk": self.tweet.pk}))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+
+# ---------------------------------------------------------------------------
+# Timeline — like count display
+# ---------------------------------------------------------------------------
+
+class TimelineLikeCountTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="StrongPass123!"
+        )
+        self.tweet = Tweet.objects.create(author=self.alice, body="Like me")
+        self.client.login(username="bob", password="StrongPass123!")
+
+    def test_like_count_is_zero_initially(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.context["tweets"][0].like_count, 0)
+
+    def test_like_count_shown_in_template(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "♡")
+
+    def test_like_count_increases_after_like(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.context["tweets"][0].like_count, 1)
+
+    def test_user_liked_annotation_false_before_like(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertFalse(response.context["tweets"][0].user_liked)
+
+    def test_user_liked_annotation_true_after_like(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        response = self.client.get(TIMELINE_URL)
+        self.assertTrue(response.context["tweets"][0].user_liked)
+
+    def test_liked_tweet_shows_filled_heart(self):
+        Like.objects.create(user=self.bob, tweet=self.tweet)
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "♥")
