@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Home — Twitter Clone{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+
+  {# Compose bar #}
+  <div class="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-4">
+    <span class="text-gray-500 text-sm">What's happening?</span>
+    <a href="{% url 'tweet_create' %}"
+       class="shrink-0 bg-blue-500 text-white px-4 py-1.5 rounded-full text-sm
+              font-medium hover:bg-blue-600 transition-colors">
+      Tweet
+    </a>
+  </div>
+
+  {# Feed #}
+  {% for tweet in tweets %}
+    <article class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="flex items-start gap-3">
+
+        {# Avatar #}
+        <a href="{% url 'profile' username=tweet.author.username %}" class="shrink-0">
+          <div class="w-10 h-10 rounded-full bg-slate-500 flex items-center justify-center
+                      text-white text-sm font-bold select-none">
+            {{ tweet.author.display_name|slice:":2"|upper }}
+          </div>
+        </a>
+
+        <div class="flex-1 min-w-0">
+          {# Author line #}
+          <div class="flex items-baseline gap-2 flex-wrap">
+            <a href="{% url 'profile' username=tweet.author.username %}"
+               class="font-semibold text-gray-900 hover:underline text-sm">
+              {{ tweet.author.display_name }}
+            </a>
+            <span class="text-gray-400 text-xs">@{{ tweet.author.username }}</span>
+            <span class="text-gray-300 text-xs">·</span>
+            <time class="text-gray-400 text-xs" datetime="{{ tweet.created_at|date:'c' }}">
+              {{ tweet.created_at|timesince }} ago
+            </time>
+          </div>
+
+          {# Body #}
+          <p class="mt-1 text-gray-800 text-sm leading-relaxed break-words">
+            {{ tweet.body }}
+          </p>
+        </div>
+
+      </div>
+    </article>
+  {% empty %}
+    <div class="text-center py-16 text-gray-400 text-sm">
+      No tweets yet.
+      <a href="{% url 'tweet_create' %}" class="text-blue-500 hover:underline ml-1">
+        Be the first!
+      </a>
+    </div>
+  {% endfor %}
+
+</div>
+{% endblock %}

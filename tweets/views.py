@@ -2,6 +2,13 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 
 from .forms import TweetForm
+from .models import Tweet
+
+
+@login_required
+def timeline(request):
+    tweets = Tweet.objects.select_related("author").order_by("-created_at")[:20]
+    return render(request, "tweets/timeline.html", {"tweets": tweets})
 
 
 @login_required

@@ -7,6 +7,7 @@ from accounts.models import User
 from .models import Tweet
 
 CREATE_URL = "/tweets/create/"
+TIMELINE_URL = "/timeline/"
 
 
 class TweetModelTest(TestCase):
@@ -209,3 +210,114 @@ class TweetCreateViewTest(TestCase):
         self.client.logout()
         self.client.post(CREATE_URL, {"body": "Should not save"})
         self.assertEqual(Tweet.objects.count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# Timeline view
+# ---------------------------------------------------------------------------
+
+class TimelineViewTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="StrongPass123!"
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    # -- Access ---------------------------------------------------------------
+
+    def test_timeline_loads_for_authenticated_user(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.status_code, 200)
+
+    def test_timeline_also_accessible_at_root(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_anonymous_user_redirected_to_login(self):
+        self.client.logout()
+        response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])
+
+    def test_anonymous_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.get(TIMELINE_URL)
+        self.assertIn("next=", response["Location"])
+
+    # -- Content --------------------------------------------------------------
+
+    def test_tweets_appear_on_timeline(self):
+        Tweet.objects.create(author=self.alice, body="Hello from Alice")
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "Hello from Alice")
+
+    def test_tweets_from_other_users_appear(self):
+        Tweet.objects.create(author=self.bob, body="Hello from Bob")
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "Hello from Bob")
+
+    def test_author_display_name_shown(self):
+        self.alice.display_name = "Alice Smith"
+        self.alice.save()
+        Tweet.objects.create(author=self.alice, body="Name test")
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "Alice Smith")
+
+    def test_author_username_shown(self):
+        Tweet.objects.create(author=self.alice, body="Username test")
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "@alice")
+
+    def test_tweet_body_shown(self):
+        Tweet.objects.create(author=self.alice, body="Specific body content")
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "Specific body content")
+
+    def test_empty_timeline_shows_empty_state(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No tweets yet")
+
+    # -- Ordering -------------------------------------------------------------
+
+    def test_newest_tweets_appear_first(self):
+        t1 = Tweet.objects.create(author=self.alice, body="Older tweet")
+        t2 = Tweet.objects.create(author=self.alice, body="Newer tweet")
+        response = self.client.get(TIMELINE_URL)
+        content = response.content.decode()
+        self.assertLess(content.index("Newer tweet"), content.index("Older tweet"))
+
+    # -- Cap at 20 ------------------------------------------------------------
+
+    def test_timeline_capped_at_20_tweets(self):
+        for i in range(25):
+            Tweet.objects.create(author=self.alice, body=f"Tweet {i:02d}")
+        response = self.client.get(TIMELINE_URL)
+        # The view slices to 20; check context directly
+        self.assertEqual(len(response.context["tweets"]), 20)
+
+    def test_older_tweets_beyond_20_not_shown(self):
+        for i in range(25):
+            Tweet.objects.create(author=self.alice, body=f"Tweet {i:02d}")
+        response = self.client.get(TIMELINE_URL)
+        # Tweet 00 is the oldest and should not appear (only newest 20 shown)
+        self.assertNotContains(response, "Tweet 00")
+
+    # -- N+1 / query count ----------------------------------------------------
+
+    def test_query_count_does_not_grow_with_more_authors(self):
+        """select_related ensures author data is fetched in the same query."""
+        for i in range(10):
+            u = User.objects.create_user(
+                username=f"u{i}", email=f"u{i}@ex.com", password="p"
+            )
+            Tweet.objects.create(author=u, body=f"Tweet by u{i}")
+
+        # Measured: session(1) + user(1) + tweets-with-author-join(1) = 3.
+        # Flat regardless of author count — proves select_related works.
+        with self.assertNumQueries(3):
+            response = self.client.get(TIMELINE_URL)
+        self.assertEqual(response.status_code, 200)
