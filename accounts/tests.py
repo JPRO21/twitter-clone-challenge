@@ -605,3 +605,154 @@ class ProfileFollowIntegrationTest(TestCase):
     def test_is_following_false_before_follow(self):
         response = self.client.get(reverse("profile", kwargs={"username": "bob"}))
         self.assertFalse(response.context["is_following"])
+
+
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+class SearchViewTest(TestCase):
+    SEARCH_URL = "/search/"
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice",
+            email="alice@example.com",
+            password="StrongPass123!",
+            display_name="Alice Smith",
+        )
+        self.bob = User.objects.create_user(
+            username="bob",
+            email="bob@example.com",
+            password="StrongPass123!",
+            display_name="Bob Jones",
+        )
+        self.carol = User.objects.create_user(
+            username="carol",
+            email="carol@example.com",
+            password="StrongPass123!",
+            display_name="Carol White",
+        )
+        self.client.login(username="alice", password="StrongPass123!")
+
+    # -- access ---------------------------------------------------------------
+
+    def test_search_page_loads(self):
+        response = self.client.get(self.SEARCH_URL)
+        self.assertEqual(response.status_code, 200)
+
+    def test_anonymous_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.get(self.SEARCH_URL)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.get(self.SEARCH_URL)
+        self.assertIn("next=", response["Location"])
+
+    # -- empty query ----------------------------------------------------------
+
+    def test_empty_query_returns_no_results(self):
+        response = self.client.get(self.SEARCH_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["users"])
+
+    def test_empty_query_string_returns_no_results(self):
+        response = self.client.get(self.SEARCH_URL + "?q=")
+        self.assertFalse(response.context["users"])
+
+    def test_whitespace_only_query_returns_no_results(self):
+        response = self.client.get(self.SEARCH_URL + "?q=   ")
+        self.assertFalse(response.context["users"])
+
+    # -- search behavior ------------------------------------------------------
+
+    def test_username_search_works(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertIn("bob", usernames)
+
+    def test_display_name_search_works(self):
+        response = self.client.get(self.SEARCH_URL + "?q=Jones")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertIn("bob", usernames)
+
+    def test_case_insensitive_username_search(self):
+        response = self.client.get(self.SEARCH_URL + "?q=BOB")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertIn("bob", usernames)
+
+    def test_case_insensitive_display_name_search(self):
+        response = self.client.get(self.SEARCH_URL + "?q=BOB JONES")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertIn("bob", usernames)
+        self.assertNotIn("alice", usernames)
+
+    def test_partial_username_match(self):
+        response = self.client.get(self.SEARCH_URL + "?q=ob")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertIn("bob", usernames)
+
+    def test_partial_display_name_match(self):
+        response = self.client.get(self.SEARCH_URL + "?q=Jones")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertIn("bob", usernames)
+
+    def test_unrelated_user_not_returned(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertNotIn("carol", usernames)
+
+    def test_current_user_excluded_from_results(self):
+        response = self.client.get(self.SEARCH_URL + "?q=alice")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertNotIn("alice", usernames)
+
+    def test_results_ordered_by_username(self):
+        response = self.client.get(self.SEARCH_URL + "?q=o")
+        usernames = [u.username for u in response.context["users"]]
+        self.assertEqual(usernames, sorted(usernames))
+
+    # -- follow integration ---------------------------------------------------
+
+    def test_non_followed_user_shows_follow_button(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertContains(response, "Follow")
+
+    def test_followed_user_shows_unfollow_button(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertContains(response, "Unfollow")
+
+    def test_is_following_annotation_false_when_not_following(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertFalse(response.context["users"][0].is_following)
+
+    def test_is_following_annotation_true_when_following(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertTrue(response.context["users"][0].is_following)
+
+    # -- template -------------------------------------------------------------
+
+    def test_profile_link_present(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertContains(response, reverse("profile", kwargs={"username": "bob"}))
+
+    def test_username_displayed_in_results(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertContains(response, "@bob")
+
+    def test_display_name_displayed_in_results(self):
+        response = self.client.get(self.SEARCH_URL + "?q=bob")
+        self.assertContains(response, "Bob Jones")
+
+    def test_no_results_message_shown(self):
+        response = self.client.get(self.SEARCH_URL + "?q=zzznomatch")
+        self.assertContains(response, "No users found")
+
+    def test_empty_state_message_shown(self):
+        response = self.client.get(self.SEARCH_URL)
+        self.assertContains(response, "Enter a name")

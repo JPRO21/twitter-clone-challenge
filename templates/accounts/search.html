@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Search — Twitter Clone{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+
+  {# Search form #}
+  <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <form method="get" action="{% url 'search' %}">
+      <div class="flex gap-3">
+        <input type="text"
+               name="q"
+               value="{{ query }}"
+               placeholder="Search by name or username…"
+               autofocus
+               class="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent">
+        <button type="submit"
+                class="shrink-0 bg-blue-500 text-white px-5 py-2 rounded-full text-sm
+                       font-medium hover:bg-blue-600 transition-colors">
+          Search
+        </button>
+      </div>
+    </form>
+  </div>
+
+  {# States #}
+  {% if query %}
+    {% for result in users %}
+      <div class="bg-white rounded-xl border border-gray-200 p-4
+                  flex items-center justify-between gap-4">
+
+        {# Avatar + identity #}
+        <div class="flex items-center gap-3 min-w-0">
+          <a href="{% url 'profile' username=result.username %}" class="shrink-0">
+            <div class="w-10 h-10 rounded-full bg-slate-500 flex items-center justify-center
+                        text-white text-sm font-bold select-none">
+              {{ result.display_name|slice:":2"|upper }}
+            </div>
+          </a>
+          <div class="min-w-0">
+            <a href="{% url 'profile' username=result.username %}"
+               class="font-semibold text-gray-900 hover:underline text-sm block truncate">
+              {{ result.display_name }}
+            </a>
+            <p class="text-gray-400 text-xs">@{{ result.username }}</p>
+          </div>
+        </div>
+
+        {# Follow / Unfollow #}
+        {% if result.is_following %}
+          <form method="post" action="{% url 'unfollow_user' username=result.username %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="shrink-0 text-sm border border-gray-300 rounded-full px-4 py-1.5
+                           hover:bg-gray-50 transition-colors">
+              Unfollow
+            </button>
+          </form>
+        {% else %}
+          <form method="post" action="{% url 'follow_user' username=result.username %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="shrink-0 text-sm bg-gray-900 text-white rounded-full px-4 py-1.5
+                           hover:bg-gray-700 transition-colors">
+              Follow
+            </button>
+          </form>
+        {% endif %}
+      </div>
+    {% empty %}
+      <div class="text-center py-16 text-gray-400 text-sm">
+        No users found for "<strong class="text-gray-600">{{ query }}</strong>".
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-center py-16 text-gray-400 text-sm">
+      Enter a name or username to find people.
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

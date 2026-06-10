@@ -1,5 +1,6 @@
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
+from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -109,3 +110,25 @@ def profile_edit(request):
     else:
         form = ProfileEditForm(instance=request.user)
     return render(request, "accounts/profile_edit.html", {"form": form})
+
+
+@login_required
+def search_users(request):
+    query = request.GET.get("q", "").strip()
+    users = User.objects.none()
+    if query:
+        following_qs = Follow.objects.filter(
+            follower=request.user,
+            following=OuterRef("pk"),
+        )
+        users = (
+            User.objects
+            .exclude(pk=request.user.pk)
+            .filter(
+                Q(username__icontains=query) |
+                Q(display_name__icontains=query)
+            )
+            .annotate(is_following=Exists(following_qs))
+            .order_by("username")
+        )
+    return render(request, "accounts/search.html", {"users": users, "query": query})
