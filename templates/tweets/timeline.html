@@ -47,8 +47,8 @@
             {{ tweet.body }}
           </p>
 
-          {# Like action #}
-          <div class="mt-2">
+          {# Like + delete actions #}
+          <div class="mt-2 flex items-center gap-4">
             {% if tweet.user_liked %}
               <form method="post" action="{% url 'unlike_tweet' pk=tweet.pk %}" class="inline">
                 {% csrf_token %}
@@ -63,6 +63,16 @@
                 <button type="submit"
                         class="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors">
                   ♡ <span>{{ tweet.like_count }}</span>
+                </button>
+              </form>
+            {% endif %}
+
+            {% if tweet.author == user %}
+              <form method="post" action="{% url 'tweet_delete' pk=tweet.pk %}" class="inline">
+                {% csrf_token %}
+                <button type="submit"
+                        class="text-xs text-gray-400 hover:text-red-500 transition-colors">
+                  Delete
                 </button>
               </form>
             {% endif %}

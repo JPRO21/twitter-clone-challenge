@@ -495,3 +495,75 @@ class TimelineLikeCountTest(TestCase):
         Like.objects.create(user=self.bob, tweet=self.tweet)
         response = self.client.get(TIMELINE_URL)
         self.assertContains(response, "♥")
+
+
+# ---------------------------------------------------------------------------
+# Tweet deletion view
+# ---------------------------------------------------------------------------
+
+class TweetDeleteViewTest(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@example.com", password="StrongPass123!"
+        )
+        self.bob = User.objects.create_user(
+            username="bob", email="bob@example.com", password="StrongPass123!"
+        )
+        self.tweet = Tweet.objects.create(author=self.alice, body="Alice's tweet")
+        self.delete_url = reverse("tweet_delete", kwargs={"pk": self.tweet.pk})
+        self.client.login(username="alice", password="StrongPass123!")
+
+    # -- owner ----------------------------------------------------------------
+
+    def test_owner_can_delete_own_tweet(self):
+        self.client.post(self.delete_url)
+        self.assertEqual(Tweet.objects.count(), 0)
+
+    def test_delete_removes_tweet_from_database(self):
+        self.client.post(self.delete_url)
+        self.assertFalse(Tweet.objects.filter(pk=self.tweet.pk).exists())
+
+    def test_successful_delete_redirects_to_timeline(self):
+        response = self.client.post(self.delete_url)
+        self.assertRedirects(response, reverse("timeline"))
+
+    # -- unauthorized (authenticated non-owner) -------------------------------
+
+    def test_another_user_cannot_delete_tweet(self):
+        self.client.login(username="bob", password="StrongPass123!")
+        self.client.post(self.delete_url)
+        self.assertTrue(Tweet.objects.filter(pk=self.tweet.pk).exists())
+
+    def test_unauthorized_deletion_returns_403(self):
+        self.client.login(username="bob", password="StrongPass123!")
+        response = self.client.post(self.delete_url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthorized_deletion_does_not_remove_tweet(self):
+        self.client.login(username="bob", password="StrongPass123!")
+        self.client.post(self.delete_url)
+        self.assertEqual(Tweet.objects.count(), 1)
+
+    # -- anonymous ------------------------------------------------------------
+
+    def test_anonymous_delete_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.post(self.delete_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_anonymous_redirect_includes_next(self):
+        self.client.logout()
+        response = self.client.post(self.delete_url)
+        self.assertIn("next=", response["Location"])
+
+    # -- template -------------------------------------------------------------
+
+    def test_delete_button_visible_for_owner(self):
+        response = self.client.get(TIMELINE_URL)
+        self.assertContains(response, "Delete")
+
+    def test_delete_button_not_visible_for_non_owner(self):
+        self.client.login(username="bob", password="StrongPass123!")
+        response = self.client.get(TIMELINE_URL)
+        self.assertNotContains(response, "Delete")

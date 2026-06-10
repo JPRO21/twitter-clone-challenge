@@ -1,5 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Exists, OuterRef
+from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import TweetForm
@@ -51,4 +52,15 @@ def unlike_tweet(request, pk):
         return redirect("timeline")
     tweet = get_object_or_404(Tweet, pk=pk)
     Like.objects.filter(user=request.user, tweet=tweet).delete()
+    return redirect("timeline")
+
+
+@login_required
+def tweet_delete(request, pk):
+    if request.method != "POST":
+        return redirect("timeline")
+    tweet = get_object_or_404(Tweet, pk=pk)
+    if tweet.author != request.user:
+        return HttpResponseForbidden()
+    tweet.delete()
     return redirect("timeline")
