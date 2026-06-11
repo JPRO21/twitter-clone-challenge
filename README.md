@@ -108,7 +108,7 @@ make coverage
 # or: docker compose run --rm web pytest --cov=. --cov-report=term-missing
 ```
 
-Current coverage: **99%** (198 tests).
+Current coverage: **91%** (198 tests).
 
 ---
 
