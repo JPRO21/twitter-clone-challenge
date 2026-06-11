@@ -67,10 +67,32 @@
     </div>
   </div>
 
-  {# Tweets section — populated when Tweet model exists #}
-  <div class="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">
-    No tweets yet.
-  </div>
+  {# Tweets section #}
+  {% for tweet in tweets %}
+    <article class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="flex items-start gap-3">
+        <div class="w-10 h-10 rounded-full bg-slate-500 flex items-center justify-center
+                    text-white text-sm font-bold shrink-0 select-none">
+          {{ tweet.author.display_name|slice:":2"|upper }}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-baseline gap-2 flex-wrap">
+            <span class="font-semibold text-gray-900 text-sm">{{ tweet.author.display_name }}</span>
+            <span class="text-gray-400 text-xs">@{{ tweet.author.username }}</span>
+            <span class="text-gray-300 text-xs">·</span>
+            <time class="text-gray-400 text-xs" datetime="{{ tweet.created_at|date:'c' }}">
+              {{ tweet.created_at|timesince }} ago
+            </time>
+          </div>
+          <p class="mt-1 text-gray-800 text-sm leading-relaxed break-words">{{ tweet.body }}</p>
+        </div>
+      </div>
+    </article>
+  {% empty %}
+    <div class="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">
+      No tweets yet.
+    </div>
+  {% endfor %}
 
 </div>
 {% endblock %}

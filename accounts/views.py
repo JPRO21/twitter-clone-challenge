@@ -5,6 +5,8 @@ from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from tweets.models import Tweet
+
 from .forms import LoginForm, ProfileEditForm, RegisterForm
 from .models import Follow, User
 
@@ -72,11 +74,18 @@ def profile(request, username):
         request.user != profile_user
         and Follow.objects.filter(follower=request.user, following=profile_user).exists()
     )
+    tweets = (
+        Tweet.objects
+        .filter(author=profile_user)
+        .select_related("author")
+        .order_by("-created_at")
+    )
     return render(request, "accounts/profile.html", {
         "profile_user": profile_user,
         "following_count": following_count,
         "followers_count": followers_count,
         "is_following": is_following,
+        "tweets": tweets,
     })
 
 

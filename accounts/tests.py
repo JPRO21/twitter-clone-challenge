@@ -2,6 +2,8 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
+from tweets.models import Tweet
+
 from .models import Follow, User
 
 
@@ -328,6 +330,20 @@ class ProfileViewTest(TestCase):
         self.client.logout()
         response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
         self.assertIn("next=", response["Location"])
+
+    def test_profile_shows_own_tweets(self):
+        Tweet.objects.create(author=self.alice, body="Hello from Alice")
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertContains(response, "Hello from Alice")
+
+    def test_profile_does_not_show_other_users_tweets(self):
+        Tweet.objects.create(author=self.bob, body="Bob's exclusive tweet")
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertNotContains(response, "Bob&#x27;s exclusive tweet")
+
+    def test_empty_profile_shows_no_tweets_message(self):
+        response = self.client.get(reverse("profile", kwargs={"username": "alice"}))
+        self.assertContains(response, "No tweets yet.")
 
 
 # ---------------------------------------------------------------------------
